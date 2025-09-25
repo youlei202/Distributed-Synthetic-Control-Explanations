@@ -1,0 +1,23 @@
+dataset: adult
+N_devices: 10
+non_iid: label_skew
+probe:
+  m: 500
+  theta0: [0.0, 0.5, 1.0]
+interventions:
+  - type: FeatureAdd
+    feat_idx: 2
+    delta_max: 5.0
+  - type: FeatureScale
+    feat_idx: 5
+    scale_max: 0.5
+post_grid: [1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+anchors:
+  K: 50
+  tau: 0.5
+matching:
+  lambda: 0.01
+mode: p
+baselines: [avg, topk, glob, lp, ur]
+queries: 100
+seed: 42

@@ -1,0 +1,20 @@
+dataset: bike
+N_devices: 10
+non_iid: covariate_shift
+probe:
+  m: 500
+  theta0: [0.0, 0.3, 0.6]
+interventions:
+  - type: FeatureScale
+    feat_idx: 0
+    scale_max: 0.5
+post_grid: [0.9, 1.2, 1.5, 2.0, 2.5]
+anchors:
+  K: 50
+  tau: 0.5
+matching:
+  lambda: 0.01
+mode: both  # run P and S in parallel to compare
+baselines: [avg, glob, lp]
+queries: 80
+seed: 123

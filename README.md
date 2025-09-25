@@ -239,80 +239,91 @@ class Explainer:
 
 ---
 
-## ▶️ Quickstart (Tabular, Adult Income)
+## ▶️ Quick Demo
 
-1) **Prepare data and devices**
+Run the interactive Jupyter notebooks:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the basic demo
+jupyter notebook experiments/notebooks/disco_demo.ipynb
+
+# Run the full experiment pipeline
+jupyter notebook experiments/notebooks/full_experiment_demo.ipynb
+```
+
+## 🚀 Command Line Interface
+
+DISCO provides a complete CLI for running experiments:
+
+```bash
+# 1) Train heterogeneous devices
+python -m disco.cli.main train-devices \
+  --dataset adult --N 10 --non-iid label-skew \
+  --out ./experiments/devices --seed 42
+
+# 2) Compute probe trajectories
+python -m disco.cli.main probe \
+  --devices ./experiments/devices \
+  --dataset adult --probes 500 \
+  --theta0 "[0.0,0.5,1.0]" \
+  --interventions ./experiments/configs/tabular_interventions.yaml \
+  --out ./experiments/results/run1/probes
+
+# 3) Run DISCO explanations
+python -m disco.cli.main explain \
+  --devices ./experiments/devices \
+  --probes ./experiments/results/run1/probes \
+  --dataset adult --targets 0,1,2 --queries 100 \
+  --K 50 --tau 0.5 --lam 0.01 --mode p \
+  --baselines avg,topk,glob,lp \
+  --out ./experiments/results/run1
+
+# 4) Run demo script
+python experiments/run_demo.py
+```
+
+## 💻 Python API Quickstart
 
 ```python
 from disco.data.loaders import load_adult
 from disco.devices.sklearn_tabular import SklearnDevice
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-
-X_train, y_train, X_test, y_test = load_adult()
-# Partition training across N devices (non-IID supported)
-from disco.data.splits import split_across_devices
-splits = split_across_devices(X_train, y_train, N=5, strategy="label-skew", seed=42)
-
-devices = []
-for j, (Xj, yj) in enumerate(splits):
-    # heterogeneous models per device
-    model = (j % 2 == 0) and LogisticRegression(max_iter=200) or RandomForestClassifier()
-    model.fit(Xj, yj)
-    devices.append(SklearnDevice(id=f"dev{j+1}", model=model, task="classification", scalarization="prob"))
-```
-
-2) **Create probe set and interventions**
-
-```python
 from disco.interventions.tabular import FeatureAdd
 from disco.interventions.grids import Grids
-import numpy as np
-
-P = X_test[:500]  # public unlabeled probes
-d = FeatureAdd(feat_idx=2, delta_max=5.0, clamp=None)
-grids = Grids(theta0=np.array([0.0, 0.5, 1.0]),
-              theta =np.linspace(1.5, 5.0, 8))
-```
-
-3) **Pre‑window probe trajectories (public)**
-
-```python
-from disco.cli.main import compute_probe_trajectories
-traj = compute_probe_trajectories(devices, P, interventions=[d], theta0=grids.theta0)
-# traj: dict[(device_id, d.name)] -> array [m, q]
-```
-
-4) **Anchor selection and matching (at target t)**
-
-```python
 from disco.anchors.knn import AnchorSelector
-from disco.matching.weights import WeightSolver, MatchInputs
-
-t = devices[0]                  # target device
-x_star = X_test[777:778]        # private query
-selector = AnchorSelector(emb=lambda X: X, K=50, tau=0.5)
-anchor_sel = selector.select(P, x_star)
-
-# Build y_t and X_peers over anchors × theta0
-from disco.data.loaders import stack_prewindow
-y_t, X_peers = stack_prewindow(traj, target=t, devices=devices, anchor_sel=anchor_sel, d=d, theta0=grids.theta0)
-solver = WeightSolver()
-mr = solver.solve(MatchInputs(y_t=y_t, X_peers=X_peers, lam=1e-2))
-```
-
-5) **Counterfactual and explanation**
-
-```python
-from disco.counterfactual.pmode import PMModeCounterfactual
+from disco.matching.weights import WeightSolver
+from disco.counterfactual.pmode import PModeCounterfactual
 from disco.explain.te_curve import Explainer
+from disco.cli.main import run_disco_pipeline
 
-pm = PMModeCounterfactual()
-y_syn, B_proxy = pm.build(mr.w, devices, P, anchor_sel, x_star, grids, d)
+# Load data and create devices
+X_train, y_train, X_test, y_test = load_adult()
+# ... train heterogeneous devices (see notebook for details)
 
-expl = Explainer()
-out = expl.run(t, y_syn, x_star, grids, d, task=t.task)
-print("AUC-TE:", out.auc_abs, "flip θ:", out.flip_theta)
+# Define intervention and grids
+intervention = FeatureAdd(feat_idx=2, delta_max=5.0, name="add_f2")
+grids = Grids(theta0=np.array([0.0, 0.5, 1.0]),
+              theta=np.linspace(1.5, 5.0, 8))
+
+# Run complete DISCO pipeline
+results = run_disco_pipeline(
+    target_device=devices[0],
+    devices=devices,
+    x_star=X_test[100:101],  # private query
+    X_probe=X_test[:500],    # public probes
+    intervention=intervention,
+    grids=grids,
+    anchor_selector=AnchorSelector(emb=lambda X: X, K=50, tau=0.5),
+    weight_solver=WeightSolver(),
+    counterfactual_builder=PModeCounterfactual(),
+    explainer=Explainer(),
+    trajectories=trajectories,  # pre-computed
+    mode="p"
+)
+
+print(f"AUC-TE: {results['te_output'].auc_abs:.4f}")
 ```
 
 ---

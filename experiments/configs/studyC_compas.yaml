@@ -1,0 +1,20 @@
+dataset: compas
+N_devices: 10
+non_iid: feature_shift
+probe:
+  m: 400
+  theta0: [0.0, 0.4, 0.8]
+interventions:
+  - type: FeatureAdd
+    feat_idx: 1
+    delta_max: 3.0
+post_grid: [1.2, 1.6, 2.0, 2.4]
+anchors:
+  K: 30
+  tau: 0.8
+matching:
+  lambda: 0.03
+mode: p
+baselines: [avg, topk, lp]
+queries: 60
+seed: 7
