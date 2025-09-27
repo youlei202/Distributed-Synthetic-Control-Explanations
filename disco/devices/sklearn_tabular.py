@@ -67,42 +67,45 @@ class SklearnDevice:
                     probs[i, p] = 1.0
                 return probs
 
+    def _compute_probabilities(self, raw: np.ndarray) -> np.ndarray:
+        """Convert raw classifier outputs to probabilities."""
+        if raw.ndim == 1:
+            raw = raw.reshape(-1, 1)
+
+        # Apply temperature scaling if requested (pre-softmax)
+        temperature = self.temperature if self.temperature > 0 else 1.0
+
+        # If values already look like probabilities (non-negative and rows sum to ~1)
+        if raw.min() >= 0 and raw.max() <= 1:
+            row_sums = raw.sum(axis=1, keepdims=True)
+            if np.allclose(row_sums, 1.0, atol=1e-6):
+                return raw
+
+        # Stable softmax
+        shifted = raw / temperature
+        shifted = shifted - shifted.max(axis=1, keepdims=True)
+        exp_raw = np.exp(shifted)
+        probs = exp_raw / exp_raw.sum(axis=1, keepdims=True)
+        return probs
+
     def g(self, raw: np.ndarray, target_class: int = 1) -> np.ndarray:
         """Scalarize raw outputs."""
         if self.task == "regression":
             if self.scalarization == "identity":
                 return raw.flatten()
-            else:
-                raise ValueError(f"Invalid scalarization {self.scalarization} for regression")
+            raise ValueError(f"Invalid scalarization {self.scalarization} for regression")
 
-        else:
-            # Classification
-            if self.scalarization == "prob":
-                # Apply temperature calibration
-                if self.temperature != 1.0:
-                    # Softmax with temperature
-                    exp_raw = np.exp(raw / self.temperature)
-                    probs = exp_raw / exp_raw.sum(axis=1, keepdims=True)
-                    return probs[:, target_class]
-                else:
-                    # Already probabilities
-                    if raw.min() >= 0 and raw.max() <= 1:
-                        return raw[:, target_class]
-                    else:
-                        # Convert to probabilities
-                        exp_raw = np.exp(raw)
-                        probs = exp_raw / exp_raw.sum(axis=1, keepdims=True)
-                        return probs[:, target_class]
+        # Classification scalarizations
+        probs = self._compute_probabilities(raw)
 
-            elif self.scalarization == "logit":
-                # Return log odds for target class
-                probs = self.g(raw, target_class)  # Get probabilities first
-                # Clip to avoid log(0)
-                probs = np.clip(probs, 1e-10, 1 - 1e-10)
-                return np.log(probs / (1 - probs))
+        if self.scalarization == "prob":
+            return probs[:, target_class]
 
-            else:
-                raise ValueError(f"Unknown scalarization: {self.scalarization}")
+        if self.scalarization == "logit":
+            target_probs = np.clip(probs[:, target_class], 1e-10, 1 - 1e-10)
+            return np.log(target_probs / (1 - target_probs))
+
+        raise ValueError(f"Unknown scalarization: {self.scalarization}")
 
 
 class XGBoostDevice(SklearnDevice):

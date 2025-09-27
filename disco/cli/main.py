@@ -233,12 +233,19 @@ def probe_cmd(args):
     print(f"Pre-window: {theta0}")
 
     # Load interventions
-    if args.interventions.endswith('.yaml'):
-        with open(args.interventions) as f:
-            interv_config = yaml.safe_load(f)
-        interventions = load_interventions_from_config(interv_config)
+    if args.interventions:
+        if args.interventions.endswith('.yaml'):
+            with open(args.interventions) as f:
+                interv_config = yaml.safe_load(f)
+            interventions = load_interventions_from_config(interv_config)
+        else:
+            # Non-YAML argument provided; fall back to defaults
+            interventions = [
+                FeatureAdd(feat_idx=0, delta_max=3.0, name="add_f0"),
+                FeatureScale(feat_idx=1, scale_max=0.5, name="scale_f1")
+            ]
     else:
-        # Default interventions
+        # Default interventions when no argument supplied
         interventions = [
             FeatureAdd(feat_idx=0, delta_max=3.0, name="add_f0"),
             FeatureScale(feat_idx=1, scale_max=0.5, name="scale_f1")
@@ -332,10 +339,15 @@ def explain_cmd(args):
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
     # Load interventions from config
-    if args.interventions.endswith('.yaml'):
-        with open(args.interventions) as f:
-            interv_config = yaml.safe_load(f)
-        interventions = load_interventions_from_config(interv_config)
+    if args.interventions:
+        if args.interventions.endswith('.yaml'):
+            with open(args.interventions) as f:
+                interv_config = yaml.safe_load(f)
+            interventions = load_interventions_from_config(interv_config)
+        else:
+            interventions = [
+                FeatureAdd(feat_idx=0, delta_max=3.0, name="add_f0")
+            ]
     else:
         interventions = [
             FeatureAdd(feat_idx=0, delta_max=3.0, name="add_f0")
