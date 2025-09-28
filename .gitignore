@@ -208,6 +208,7 @@ __marimo__/
 
 
 experiments/demo_devices/
+experiments/synth_devices/
 experiments/results/
 
 .history
