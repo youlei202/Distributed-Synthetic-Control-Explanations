@@ -199,6 +199,125 @@ class BaselineRunner:
             meta={"method": "topk", "K": len(top_peers), "selected_peers": [d.id for d in top_peers]}
         )
 
+    def baseline_oracle_ground_truth(
+        self,
+        devices: List[Device],
+        trajectories: Dict,
+        theta0: np.ndarray,
+        x_star: np.ndarray,
+        grids: Grids,
+        intervention: Intervention,
+        target_idx: int,
+        target_class: int = 1,
+        lam: float = 0.01,
+        weight_solver: Optional[Any] = None,
+    ) -> BaselineOutput:
+        """Option B: oracle-w ground truth baseline shared across methods."""
+        from disco.data.loaders import stack_prewindow
+        from disco.matching.weights import MatchInputs, WeightSolver
+        from disco.counterfactual.smode import SModeCounterfactual
+
+        if x_star.ndim == 1:
+            x_star = x_star.reshape(1, -1)
+
+        if not trajectories:
+            raise ValueError("Trajectories are required to compute oracle weights")
+
+        target_device = devices[target_idx]
+
+        sample_key = next(iter(trajectories))
+        n_probes = trajectories[sample_key].shape[0]
+        full_anchor = AnchorSelection(
+            indices=np.arange(n_probes),
+            weights=np.ones(n_probes) / n_probes,
+            distances=np.zeros(n_probes),
+        )
+
+        y_pre, X_pre = stack_prewindow(
+            trajectories=trajectories,
+            target=target_device,
+            devices=devices,
+            anchor_sel=full_anchor,
+            intervention=intervention,
+            theta0=theta0,
+        )
+
+        if X_pre.shape[1] == 0:
+            raise ValueError("Oracle baseline requires at least one peer device")
+
+        solver = weight_solver or WeightSolver(method="projected_grad", max_iter=2000)
+        w_star = solver.solve(MatchInputs(y_t=y_pre, X_peers=X_pre, lam=lam)).w
+        w_star = np.asarray(w_star, dtype=float).reshape(-1)
+
+        smode_builder = SModeCounterfactual()
+        y_syn = smode_builder.build(
+            w_star,
+            devices,
+            x_star,
+            grids,
+            intervention,
+            target_device,
+            target_class,
+        )
+
+        y_t = np.zeros(len(grids.theta))
+        for i, theta in enumerate(grids.theta):
+            x_intervened = intervention.apply(x_star, theta)
+            raw = target_device.predict_raw(x_intervened)
+            y_t[i] = target_device.g(raw, target_class)[0]
+
+        tau = y_t - y_syn
+        auc_abs = np.trapz(np.abs(tau), grids.theta)
+        flip_theta = self._find_flip_intensity(
+            target_device, x_star, intervention, grids.theta, target_class
+        )
+
+        return BaselineOutput(
+            theta=grids.theta,
+            y_t=y_t,
+            y_syn=y_syn,
+            tau=tau,
+            auc_abs=auc_abs,
+            flip_theta=flip_theta,
+            meta={
+                "method": "oracle_w",
+                "lam": lam,
+                "weights": w_star.tolist(),
+                "n_probes": int(n_probes),
+                "peer_ids": [d.id for d in devices if d.id != target_device.id],
+                "weights_l1": float(np.sum(w_star)),
+            },
+        )
+
+    def baseline_oracle(
+        self,
+        devices: List[Device],
+        trajectories: Dict,
+        theta0: np.ndarray,
+        x_star: np.ndarray,
+        grids: Grids,
+        intervention: Intervention,
+        target_idx: int,
+        target_class: int = 1,
+        lam: float = 0.01,
+        weight_solver: Optional[Any] = None,
+    ) -> BaselineOutput:
+        """Backward-compatible alias for oracle-w baseline."""
+
+        return self.baseline_oracle_ground_truth(
+            devices=devices,
+            trajectories=trajectories,
+            theta0=theta0,
+            x_star=x_star,
+            grids=grids,
+            intervention=intervention,
+            target_idx=target_idx,
+            target_class=target_class,
+            lam=lam,
+            weight_solver=weight_solver,
+        )
+
+
     def baseline_glob_matching(
         self,
         devices: List[Device],
