@@ -211,8 +211,19 @@ class BaselineRunner:
         target_class: int = 1,
         lam: float = 0.01,
         weight_solver: Optional[Any] = None,
+        *,
+        oracle_devices: Optional[List[Device]] = None,
+        oracle_trajectories: Optional[Dict] = None,
+        oracle_theta0: Optional[np.ndarray] = None,
     ) -> BaselineOutput:
-        """Option B: oracle-w ground truth baseline shared across methods."""
+        """Option B: oracle-w ground truth baseline shared across methods.
+
+        The baseline can optionally receive a separate set of oracle
+        devices/trajectories (e.g., analytic generator outputs). When
+        provided, these are used for both weight computation and
+        S-mode evaluation, ensuring the ground-truth reference does not
+        depend on the learned models supplied in ``devices``.
+        """
         from disco.data.loaders import stack_prewindow
         from disco.matching.weights import MatchInputs, WeightSolver
         from disco.counterfactual.smode import SModeCounterfactual
@@ -220,13 +231,21 @@ class BaselineRunner:
         if x_star.ndim == 1:
             x_star = x_star.reshape(1, -1)
 
-        if not trajectories:
+        # Choose sources for oracle computations
+        ref_devices = oracle_devices if oracle_devices is not None else devices
+        ref_trajectories = oracle_trajectories if oracle_trajectories is not None else trajectories
+        ref_theta0 = oracle_theta0 if oracle_theta0 is not None else theta0
+
+        if not ref_trajectories:
             raise ValueError("Trajectories are required to compute oracle weights")
 
-        target_device = devices[target_idx]
+        if target_idx >= len(ref_devices):
+            raise IndexError("target_idx out of range for oracle devices")
 
-        sample_key = next(iter(trajectories))
-        n_probes = trajectories[sample_key].shape[0]
+        target_device = ref_devices[target_idx]
+
+        sample_key = next(iter(ref_trajectories))
+        n_probes = ref_trajectories[sample_key].shape[0]
         full_anchor = AnchorSelection(
             indices=np.arange(n_probes),
             weights=np.ones(n_probes) / n_probes,
@@ -234,12 +253,12 @@ class BaselineRunner:
         )
 
         y_pre, X_pre = stack_prewindow(
-            trajectories=trajectories,
+            trajectories=ref_trajectories,
             target=target_device,
-            devices=devices,
+            devices=ref_devices,
             anchor_sel=full_anchor,
             intervention=intervention,
-            theta0=theta0,
+            theta0=ref_theta0,
         )
 
         if X_pre.shape[1] == 0:
@@ -252,7 +271,7 @@ class BaselineRunner:
         smode_builder = SModeCounterfactual()
         y_syn = smode_builder.build(
             w_star,
-            devices,
+            ref_devices,
             x_star,
             grids,
             intervention,
@@ -284,8 +303,9 @@ class BaselineRunner:
                 "lam": lam,
                 "weights": w_star.tolist(),
                 "n_probes": int(n_probes),
-                "peer_ids": [d.id for d in devices if d.id != target_device.id],
+                "peer_ids": [d.id for d in ref_devices if d.id != target_device.id],
                 "weights_l1": float(np.sum(w_star)),
+                "used_oracle_devices": oracle_devices is not None,
             },
         )
 
@@ -301,6 +321,7 @@ class BaselineRunner:
         target_class: int = 1,
         lam: float = 0.01,
         weight_solver: Optional[Any] = None,
+        **kwargs,
     ) -> BaselineOutput:
         """Backward-compatible alias for oracle-w baseline."""
 
@@ -315,6 +336,7 @@ class BaselineRunner:
             target_class=target_class,
             lam=lam,
             weight_solver=weight_solver,
+            **kwargs,
         )
 
 
