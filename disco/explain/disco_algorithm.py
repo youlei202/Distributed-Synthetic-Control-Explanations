@@ -38,6 +38,7 @@ class DiscoRunner:
         weight_solver: Optional[WeightSolver] = None,
         counterfactual_builder: Optional[object] = None,
         explainer: Optional[Explainer] = None,
+        anchor_space: str = "response",
     ) -> None:
         self.default_mode = mode
         self.default_lam = lam
@@ -45,6 +46,7 @@ class DiscoRunner:
         self.default_weight_solver = weight_solver
         self.default_counterfactual_builder = counterfactual_builder
         self.default_explainer = explainer
+        self.default_anchor_space = anchor_space
 
     def run(
         self,
@@ -63,6 +65,7 @@ class DiscoRunner:
         weight_solver: Optional[WeightSolver] = None,
         counterfactual_builder: Optional[object] = None,
         explainer: Optional[Explainer] = None,
+        anchor_space: Optional[str] = None,
     ) -> DiscoOutput:
         """Run DISCO with explicit inputs."""
         if x_star.ndim == 1:
@@ -96,6 +99,7 @@ class DiscoRunner:
             target_class=target_class,
             mode=runner_mode,
             lam=runner_lam,
+            anchor_space=anchor_space or self.default_anchor_space,
         )
 
         diagnostics = {k: v for k, v in result.items() if k not in ("te_output", "weights")}

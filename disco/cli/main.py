@@ -505,7 +505,8 @@ def explain_cmd(args):
                         trajectories=trajectories,
                         target_class=1,
                         mode=args.mode,
-                        lam=args.lam
+                        lam=args.lam,
+                        anchor_space="response"
                     )
 
                     # Save results
@@ -553,7 +554,8 @@ def run_disco_pipeline(
     trajectories: Dict,
     target_class: int = 1,
     mode: str = "p",
-    lam: float = 0.01
+    lam: float = 0.01,
+    anchor_space: str = "response",
 ) -> dict:
     """Run complete DISCO pipeline."""
     from disco.matching.metrics import (
@@ -563,7 +565,49 @@ def run_disco_pipeline(
     from disco.anchors.knn import compute_anchor_radius
 
     # Anchor selection
-    anchor_sel = anchor_selector.select(X_probe, x_star)
+    use_response_space = (
+        anchor_space == "response" and grids.theta0.size > 0
+    )
+    effective_anchor_space = "response" if use_response_space else "features"
+
+    if use_response_space:
+        target_key = (target_device.id, intervention.name)
+        if target_key not in trajectories:
+            raise ValueError(
+                f"Missing target trajectories for {target_key} required for response-space anchors"
+            )
+
+        target_traj = trajectories[target_key]
+        probe_embed = np.atleast_2d(target_traj.astype(float))
+
+        # Standardize signatures for stable distance computation
+        mu = probe_embed.mean(axis=0, keepdims=True)
+        sigma = probe_embed.std(axis=0, keepdims=True)
+        sigma[sigma < 1e-6] = 1.0
+        probe_embed = (probe_embed - mu) / sigma
+
+        # Target signature at x_star
+        q = len(grids.theta0)
+        x_signature = np.zeros((1, q), dtype=float)
+        for idx, theta in enumerate(grids.theta0):
+            x_theta = intervention.apply(x_star, float(theta))
+            raw = target_device.predict_raw(x_theta)
+            x_signature[0, idx] = target_device.g(raw, target_class)[0]
+        x_signature = (x_signature - mu) / sigma
+
+        if isinstance(anchor_selector, AnchorSelector):
+            response_selector = AnchorSelector(
+                K=anchor_selector.K,
+                tau=anchor_selector.tau,
+                kernel=anchor_selector.kernel,
+            )
+        else:
+            response_selector = anchor_selector
+
+        anchor_sel = response_selector.select(probe_embed, x_signature)
+    else:
+        anchor_sel = anchor_selector.select(X_probe, x_star)
+
     anchor_radius = compute_anchor_radius(anchor_sel, X_probe, x_star)
 
     # Stack pre-window data
@@ -609,7 +653,8 @@ def run_disco_pipeline(
         "weight_sparsity": weight_sparsity,
         "n_effective_peers": n_effective,
         "weight_entropy": weight_entropy,
-        "anchor_selection": anchor_sel
+        "anchor_selection": anchor_sel,
+        "anchor_space": effective_anchor_space,
     }
 
 
@@ -695,6 +740,7 @@ def synth_cmd(args):
         target_class=0,
         mode=args.mode,
         lam=args.lam,
+        anchor_space="response",
     )
 
     te_output = result["te_output"]

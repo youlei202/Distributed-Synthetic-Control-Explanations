@@ -8,8 +8,9 @@ from typing import Optional
 @dataclass
 class Grids:
     """Container for pre-window and post-grid intensities."""
+
     theta0: np.ndarray  # Pre-window, e.g., [0, ε, 2ε]
-    theta: np.ndarray   # Post-grid, e.g., [γ, ..., θ_max]
+    theta: np.ndarray  # Post-grid, e.g., [γ, ..., θ_max]
 
     def __post_init__(self):
         """Validate grid configuration."""
@@ -35,7 +36,7 @@ def create_grids(
     epsilon: float,
     n_pre: int = 3,
     n_post: int = 8,
-    gap_factor: float = 1.5
+    gap_factor: float = 1.5,
 ) -> Grids:
     """Create standard grids for interventions.
 
@@ -65,7 +66,7 @@ def create_adaptive_grids(
     theta_max: float,
     n_pre: int = 3,
     n_post: int = 8,
-    percentile: float = 10.0
+    percentile: float = 10.0,
 ) -> Grids:
     """Create adaptive grids based on feature statistics.
 
@@ -92,10 +93,7 @@ def create_adaptive_grids(
     epsilon = percentile / 100.0 * scale
 
     return create_grids(
-        theta_max=theta_max,
-        epsilon=epsilon,
-        n_pre=n_pre,
-        n_post=n_post
+        theta_max=theta_max, epsilon=epsilon, n_pre=n_pre, n_post=n_post
     )
 
 
