@@ -119,6 +119,61 @@ class SyntheticScenario:
         tau = y_target - y_syn
         return y_target, y_syn, tau
 
+    def compute_pier_truth(
+        self,
+        weights: np.ndarray,
+        x: Optional[np.ndarray],
+        theta: Optional[np.ndarray],
+    ) -> np.ndarray:
+        """Compute ground-truth PIER curve at x, theta for this scenario.
+
+        PIER (peer in-expressible residual) is the portion of the target effect
+        that cannot be spanned by the peer mixture along the post-grid. In this
+        synthetic generator, each device's effect component factorizes as
+        s(theta) * h(x) * alpha_device. With oracle pre-window weights w, the
+        peer-expressible component uses w @ alpha_peers. Therefore the residual
+        amplitude is (alpha_target - w @ alpha_peers).
+
+        Args:
+            weights: Oracle or estimated peer weights over peers (length N-1)
+            x: Query point (1, p) or (p,)
+            theta: Post-grid intensities (r,)
+
+        Returns:
+            pier_true: ndarray of shape (r,) giving the PIER curve.
+        """
+        if x is None:
+            x = self.x_star
+        if theta is None:
+            theta = self.theta
+
+        x = np.asarray(x)
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+        theta = np.asarray(theta, dtype=float)
+
+        # Effect direction h(x)
+        z = x[:, 1:]
+        if z.size:
+            h = float(z @ self.params.effect_weights)
+        else:
+            h = 0.0
+
+        # Effect scale s(theta)
+        s = np.clip(theta - float(self.params.intensity_break), 0.0, None)
+        span = float(max(self.params.theta_span, 1e-12))
+        s = s / span
+
+        # Amplitude gap (target vs peer mixture)
+        alpha_target = float(self.devices[0].alpha)
+        alpha_peers = np.array([d.alpha for d in self.devices[1:]], dtype=float)
+        weights = np.asarray(weights, dtype=float).reshape(-1)
+        if weights.size != alpha_peers.size:
+            raise ValueError("weights length must equal number of peers (N-1)")
+        amp_gap = alpha_target - float(np.dot(weights, alpha_peers))
+
+        return s * h * amp_gap
+
     def sample_dataset(
         self,
         device_idx: int,

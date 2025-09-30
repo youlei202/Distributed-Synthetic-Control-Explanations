@@ -527,6 +527,116 @@ class BaselineRunner:
             }
         )
 
+    def baseline_cone_relaxed_matching(
+        self,
+        devices: List[Device],
+        trajectories: Dict,
+        theta0: np.ndarray,
+        x_star: np.ndarray,
+        grids: Grids,
+        intervention: Intervention,
+        target_idx: int,
+        lam: float = 0.01,
+        target_class: int = 1,
+        max_iter: int = 1000,
+    ) -> BaselineOutput:
+        """Cone-relaxed matching: w >= 0, sum(w) <= 1 (no forced normalization).
+
+        Uses projected gradient descent on the convex program:
+            min 0.5||Xw - y||^2 + 0.5*lam||w||^2  s.t. w>=0, sum(w)<=1
+
+        Projection is onto the positive L1-ball of radius 1: if sum(w_pos)<=1 keep,
+        else project onto simplex.
+        """
+        from disco.data.loaders import stack_prewindow
+
+        if x_star.ndim == 1:
+            x_star = x_star.reshape(1, -1)
+
+        target_device = devices[target_idx]
+
+        # Global anchors: use all probes equally
+        m = next(iter(trajectories.values())).shape[0]
+        full_anchor = AnchorSelection(
+            indices=np.arange(m),
+            weights=np.ones(m) / m,
+            distances=np.zeros(m),
+        )
+
+        y_t, X_peers = stack_prewindow(
+            trajectories, target_device, devices, full_anchor, intervention, theta0
+        )
+
+        # Precompute
+        XtX = X_peers.T @ X_peers + lam * np.eye(X_peers.shape[1])
+        Xty = X_peers.T @ y_t
+
+        # Step size via Lipschitz bound (spectral norm of XtX)
+        try:
+            L = float(np.linalg.norm(XtX, 2))
+        except Exception:
+            L = float(np.trace(XtX))
+        eta = 1.0 / (L + 1e-8)
+
+        # Initialize and iterate
+        w = np.zeros(X_peers.shape[1])
+        for _ in range(max_iter):
+            grad = XtX @ w - Xty
+            w = w - eta * grad
+            # Project onto {w>=0, sum<=1}
+            w = np.maximum(w, 0.0)
+            s = w.sum()
+            if s > 1.0:
+                # Project onto simplex (sum=1, w>=0)
+                # Duchi et al. 2008 projection via sorting
+                u = np.sort(w)[::-1]
+                cssv = np.cumsum(u)
+                rho = np.nonzero(u * np.arange(1, len(u) + 1) > (cssv - 1))[0]
+                if rho.size == 0:
+                    theta = 0.0
+                else:
+                    rho = rho[-1]
+                    theta = (cssv[rho] - 1.0) / float(rho + 1)
+                w = np.maximum(w - theta, 0.0)
+
+        # Build synthetic trajectory using S-mode simulator
+        from disco.counterfactual.smode import SModeCounterfactual
+        smode_builder = SModeCounterfactual()
+        y_syn = smode_builder.build(
+            w, devices, x_star, grids, intervention, target_device, target_class
+        )
+
+        # Compute target trajectory
+        y_t_post = np.zeros(len(grids.theta))
+        for i, theta in enumerate(grids.theta):
+            x_intervened = intervention.apply(x_star, theta)
+            raw = target_device.predict_raw(x_intervened)
+            y_t_post[i] = target_device.g(raw, target_class)[0]
+
+        tau = y_t_post - y_syn
+        auc_abs = np.trapz(np.abs(tau), grids.theta)
+        flip_theta = self._find_flip_intensity(
+            target_device, x_star, intervention, grids.theta, target_class
+        )
+
+        # Pre-window residual per-sample
+        eps_pre = float(np.linalg.norm(X_peers @ w - y_t)) / max(len(y_t), 1)
+
+        return BaselineOutput(
+            theta=grids.theta,
+            y_t=y_t_post,
+            y_syn=y_syn,
+            tau=tau,
+            auc_abs=auc_abs,
+            flip_theta=flip_theta,
+            meta={
+                "method": "cone_relaxed",
+                "sum_w": float(w.sum()),
+                "n_active": int(np.sum(w > 1e-6)),
+                "eps_pre": eps_pre,
+            },
+        )
+
     def baseline_local_perturbation(
         self,
         device_t: Device,
