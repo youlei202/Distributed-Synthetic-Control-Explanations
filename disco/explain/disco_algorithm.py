@@ -32,7 +32,7 @@ class DiscoRunner:
 
     def __init__(
         self,
-        mode: str = "p",
+        mode: str = "s",
         lam: float = 0.01,
         anchor_selector: Optional[AnchorSelector] = None,
         weight_solver: Optional[WeightSolver] = None,
@@ -74,12 +74,20 @@ class DiscoRunner:
         runner_mode = mode or self.default_mode
         runner_lam = self.default_lam if lam is None else lam
         anchor = anchor_selector or self.default_anchor_selector or AnchorSelector()
-        solver = weight_solver or self.default_weight_solver or WeightSolver(method="projected_grad", max_iter=1000)
+        solver = (
+            weight_solver
+            or self.default_weight_solver
+            or WeightSolver(method="projected_grad", max_iter=1000)
+        )
         if counterfactual_builder is None:
             if self.default_counterfactual_builder is not None:
                 builder = self.default_counterfactual_builder
             else:
-                builder = PModeCounterfactual() if runner_mode == "p" else SModeCounterfactual()
+                builder = (
+                    PModeCounterfactual()
+                    if runner_mode == "p"
+                    else SModeCounterfactual()
+                )
         else:
             builder = counterfactual_builder
         expl = explainer or self.default_explainer or Explainer()
@@ -102,8 +110,14 @@ class DiscoRunner:
             anchor_space=anchor_space or self.default_anchor_space,
         )
 
-        diagnostics = {k: v for k, v in result.items() if k not in ("te_output", "weights")}
-        return DiscoOutput(te_output=result["te_output"], weights=result["weights"], diagnostics=diagnostics)
+        diagnostics = {
+            k: v for k, v in result.items() if k not in ("te_output", "weights")
+        }
+        return DiscoOutput(
+            te_output=result["te_output"],
+            weights=result["weights"],
+            diagnostics=diagnostics,
+        )
 
 
 __all__ = ["DiscoRunner", "DiscoOutput"]
