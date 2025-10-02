@@ -748,19 +748,9 @@ def synth_cmd(args):
     devices = scenario.devices
     X_probe = scenario.X_probe
 
-    intervention = FeatureAdd(
-        feat_idx=0, delta_max=float(theta_post.max()), name="intensity_shift"
-    )
-
-    trajectories = compute_probe_trajectories(
-        devices=devices,
-        X_probe=X_probe,
-        interventions=[intervention],
-        theta0=theta0,
-        dp_noise_std=0.0,
-        seed=args.seed,
-        target_class=0,
-    )
+    # Default synthetic scenario no longer exports precomputed trajectories.
+    # Users can generate them via `probe` with their chosen interventions.
+    trajectories = {}
 
     out_dir = Path(args.out)
     if out_dir.exists():

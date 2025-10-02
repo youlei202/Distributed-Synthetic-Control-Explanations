@@ -14,6 +14,7 @@ def compute_pier_truth(
     weights: np.ndarray,
     x_star: np.ndarray,
     theta: np.ndarray,
+    intervention,
 ) -> np.ndarray:
     """Wrapper that uses the scenario's analytic factorization to compute PIER.
 
@@ -22,11 +23,14 @@ def compute_pier_truth(
         weights: Peer weights over N-1 peers
         x_star: Query point (1, p) or (p,)
         theta: Post-grid intensities
+        intervention: Intervention used for evaluation
 
     Returns:
         pier_true vector aligned with theta
     """
-    return scenario.compute_pier_truth(weights=weights, x=x_star, theta=theta)
+    return scenario.compute_pier_truth(
+        weights=weights, x=x_star, theta=theta, intervention=intervention
+    )
 
 
 def compute_pier_metrics(
@@ -76,4 +80,3 @@ def compute_pier_metrics(
 
 
 __all__ = ["compute_pier_truth", "compute_pier_metrics"]
-

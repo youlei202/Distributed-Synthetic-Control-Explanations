@@ -15,8 +15,6 @@ class SyntheticParameters:
 
     base_weights: np.ndarray
     effect_weights: np.ndarray
-    intensity_break: float
-    theta_span: float
     noise_std: float
 
 
@@ -34,25 +32,23 @@ class SyntheticDevice:
     n_outputs: int = 1
 
     def predict_raw(self, X: np.ndarray) -> np.ndarray:
-        """Evaluate device on inputs with intensity stored in first feature."""
-        X = np.asarray(X)
+        """Evaluate device on feature-only inputs."""
+        X = np.asarray(X, dtype=float)
         if X.ndim == 1:
             X = X.reshape(1, -1)
 
-        intensity = X[:, 0]
-        z = X[:, 1:]
+        features = X
 
-        base_input = z @ self.params.base_weights + self.base_offset
+        base_input = features @ self.params.base_weights + self.base_offset
         base = np.tanh(base_input)
 
-        effect_scale = np.clip(intensity - self.params.intensity_break, 0.0, None) / self.params.theta_span
-        effect = self.alpha * effect_scale * (z @ self.params.effect_weights)
+        effect = self.alpha * (features @ self.params.effect_weights)
 
         if self.noise_weights.size:
-            noise_driver = z @ self.noise_weights
+            noise_driver = features @ self.noise_weights
         else:
-            noise_driver = np.zeros(len(intensity))
-        noise = self.params.noise_std * np.tanh(noise_driver + 0.1 * intensity)
+            noise_driver = np.zeros(len(features), dtype=float)
+        noise = self.params.noise_std * np.tanh(noise_driver)
 
         return (base + effect + noise).reshape(-1, 1)
 
@@ -72,11 +68,7 @@ class SyntheticScenario:
     params: SyntheticParameters
 
     def evaluate_device(
-        self,
-        device_idx: int,
-        x: np.ndarray,
-        theta_grid: np.ndarray,
-        intervention
+        self, device_idx: int, x: np.ndarray, theta_grid: np.ndarray, intervention
     ) -> np.ndarray:
         """Evaluate device along theta grid using provided intervention."""
         device = self.devices[device_idx]
@@ -96,7 +88,7 @@ class SyntheticScenario:
         weights: np.ndarray,
         intervention,
         x: Optional[np.ndarray] = None,
-        theta: Optional[np.ndarray] = None
+        theta: Optional[np.ndarray] = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute ground-truth target, synthetic, and treatment effect curves."""
         if x is None:
@@ -109,7 +101,10 @@ class SyntheticScenario:
             raise ValueError("Weight vector length must match number of peer devices")
 
         y_target = self.evaluate_device(0, x, theta, intervention)
-        peer_curves = [self.evaluate_device(i + 1, x, theta, intervention) for i in range(len(weights))]
+        peer_curves = [
+            self.evaluate_device(i + 1, x, theta, intervention)
+            for i in range(len(weights))
+        ]
         if not peer_curves:
             y_syn = np.zeros_like(y_target)
         else:
@@ -124,100 +119,62 @@ class SyntheticScenario:
         weights: np.ndarray,
         x: Optional[np.ndarray],
         theta: Optional[np.ndarray],
+        intervention,
     ) -> np.ndarray:
-        """Compute ground-truth PIER curve at x, theta for this scenario.
+        """Compute ground-truth PIER curve by evaluating the generator."""
 
-        PIER (peer in-expressible residual) is the portion of the target effect
-        that cannot be spanned by the peer mixture along the post-grid. In this
-        synthetic generator, each device's effect component factorizes as
-        s(theta) * h(x) * alpha_device. With oracle pre-window weights w, the
-        peer-expressible component uses w @ alpha_peers. Therefore the residual
-        amplitude is (alpha_target - w @ alpha_peers).
-
-        Args:
-            weights: Oracle or estimated peer weights over peers (length N-1)
-            x: Query point (1, p) or (p,)
-            theta: Post-grid intensities (r,)
-
-        Returns:
-            pier_true: ndarray of shape (r,) giving the PIER curve.
-        """
         if x is None:
             x = self.x_star
         if theta is None:
             theta = self.theta
 
-        x = np.asarray(x)
-        if x.ndim == 1:
-            x = x.reshape(1, -1)
-        theta = np.asarray(theta, dtype=float)
-
-        # Effect direction h(x)
-        z = x[:, 1:]
-        if z.size:
-            h = float(z @ self.params.effect_weights)
-        else:
-            h = 0.0
-
-        # Effect scale s(theta)
-        s = np.clip(theta - float(self.params.intensity_break), 0.0, None)
-        span = float(max(self.params.theta_span, 1e-12))
-        s = s / span
-
-        # Amplitude gap (target vs peer mixture)
-        alpha_target = float(self.devices[0].alpha)
-        alpha_peers = np.array([d.alpha for d in self.devices[1:]], dtype=float)
-        weights = np.asarray(weights, dtype=float).reshape(-1)
-        if weights.size != alpha_peers.size:
-            raise ValueError("weights length must equal number of peers (N-1)")
-        amp_gap = alpha_target - float(np.dot(weights, alpha_peers))
-
-        return s * h * amp_gap
+        _, _, tau = self.compute_tau(
+            weights=weights,
+            intervention=intervention,
+            x=x,
+            theta=theta,
+        )
+        return tau
 
     def sample_dataset(
         self,
         device_idx: int,
         n_samples: int,
         rng: np.random.RandomState,
-        theta_range: Optional[tuple[float, float]] = None
+        theta_range: Optional[tuple[float, float]] = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Sample features and labels for a specific device."""
         device = self.devices[device_idx]
         feature_dim = device.params.base_weights.size
-        p = feature_dim + 1
 
-        if theta_range is None:
-            theta_low = float(self.theta0[0]) if self.theta0.size else 0.0
-            theta_high = float(self.theta[-1])
-        else:
-            theta_low, theta_high = theta_range
+        if theta_range is not None:
+            # kept for API compatibility; ignored so we return baseline features
+            pass
 
-        local_shift = 0.1 * (device_idx - (len(self.devices) - 1) / 2.0)
-        thetas = rng.uniform(theta_low, theta_high, size=n_samples) + local_shift
-        thetas = np.clip(thetas, theta_low, theta_high)
+        features = rng.normal(
+            loc=device.base_offset,
+            scale=1.0,
+            size=(n_samples, feature_dim),
+        )
 
-        if feature_dim > 0:
-            z = rng.normal(loc=device.base_offset, scale=1.0, size=(n_samples, feature_dim))
-        else:
-            z = np.zeros((n_samples, 0))
-
-        X = np.concatenate([thetas.reshape(-1, 1), z], axis=1)
-        y = device.predict_raw(X).reshape(-1)
-        return X, y
+        y = device.predict_raw(features).reshape(-1)
+        return features, y
 
     def save(self, path: Path) -> None:
         """Persist scenario parameters for later reuse."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         alphas = np.array([device.alpha for device in self.devices], dtype=np.float32)
-        base_offsets = np.array([device.base_offset for device in self.devices], dtype=np.float32)
-        noise_weights = np.stack([device.noise_weights for device in self.devices], axis=0)
+        base_offsets = np.array(
+            [device.base_offset for device in self.devices], dtype=np.float32
+        )
+        noise_weights = np.stack(
+            [device.noise_weights for device in self.devices], axis=0
+        )
         np.savez(
             path,
             base_weights=self.params.base_weights,
             effect_weights=self.params.effect_weights,
-            intensity_break=self.params.intensity_break,
-            theta_span=self.params.theta_span,
             noise_std=self.params.noise_std,
             theta0=self.theta0,
             theta=self.theta,
@@ -235,8 +192,6 @@ class SyntheticScenario:
         params = SyntheticParameters(
             base_weights=data["base_weights"],
             effect_weights=data["effect_weights"],
-            intensity_break=float(data["intensity_break"]),
-            theta_span=float(data["theta_span"]),
             noise_std=float(data["noise_std"]),
         )
         alphas = data["alphas"].astype(float)
@@ -276,23 +231,18 @@ def create_scenario(
     noise_std: float = 0.05,
 ) -> SyntheticScenario:
     """Sample a synthetic scenario consistent with the CLI pipeline."""
-    if p < 2:
-        raise ValueError("p must be at least 2 to allocate an intensity dimension")
+    if p < 1:
+        raise ValueError("p must be at least 1 for feature-only generation")
 
     theta0 = np.asarray(theta0, dtype=float)
     theta_post = np.asarray(theta_post, dtype=float)
 
-    feature_dim = p - 1
+    feature_dim = p
     base_weights = rng.normal(size=feature_dim)
     effect_weights = rng.normal(size=feature_dim)
-
-    intensity_break = float(theta0.max()) if theta0.size else 0.0
-    theta_span = float(max(theta_post.max() - intensity_break, 1e-6))
     params = SyntheticParameters(
         base_weights=base_weights,
         effect_weights=effect_weights,
-        intensity_break=intensity_break,
-        theta_span=theta_span,
         noise_std=noise_std,
     )
 
@@ -300,10 +250,7 @@ def create_scenario(
     alphas[0] = alpha_target
 
     base_offsets = rng.normal(scale=base_jitter, size=N)
-    if feature_dim > 0:
-        noise_weights = rng.normal(scale=1.0, size=(N, feature_dim))
-    else:
-        noise_weights = np.zeros((N, 0))
+    noise_weights = rng.normal(scale=1.0, size=(N, feature_dim))
 
     devices = [
         SyntheticDevice(
@@ -316,13 +263,8 @@ def create_scenario(
         for i in range(N)
     ]
 
-    X_probe = np.zeros((m_probe, p))
-    if feature_dim > 0:
-        X_probe[:, 1:] = rng.normal(size=(m_probe, feature_dim))
-
-    x_star = np.zeros((1, p))
-    if feature_dim > 0:
-        x_star[:, 1:] = rng.normal(size=(1, feature_dim))
+    X_probe = rng.normal(size=(m_probe, feature_dim))
+    x_star = rng.normal(size=(1, feature_dim))
 
     return SyntheticScenario(
         devices=devices,
