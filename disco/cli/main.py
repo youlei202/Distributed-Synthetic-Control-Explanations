@@ -115,7 +115,7 @@ def train_devices_cmd(args):
 
         scenario_model_templates = [
             # RandomForestRegressor(n_estimators=120, random_state=args.seed),
-            GradientBoostingRegressor(random_state=args.seed),
+            # GradientBoostingRegressor(random_state=args.seed),
             # DecisionTreeRegressor(max_depth=6, random_state=args.seed),
             MLPRegressor(
                 hidden_layer_sizes=(64, 32),
@@ -123,8 +123,8 @@ def train_devices_cmd(args):
                 early_stopping=True,
                 random_state=args.seed,
             ),
-            Ridge(alpha=1.0),
-            SVR(kernel="rbf", C=1.0, epsilon=0.1),
+            # Ridge(alpha=1.0),
+            # SVR(kernel="rbf", C=1.0, epsilon=0.1),
         ]
 
         trained_devices: List[Device] = []
