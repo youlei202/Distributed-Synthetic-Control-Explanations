@@ -32,12 +32,13 @@ class DiscoRunner:
 
     def __init__(
         self,
-        mode: str = "p",
+        mode: str = "s",
         lam: float = 0.01,
         anchor_selector: Optional[AnchorSelector] = None,
         weight_solver: Optional[WeightSolver] = None,
         counterfactual_builder: Optional[object] = None,
         explainer: Optional[Explainer] = None,
+        anchor_space: str = "response",
     ) -> None:
         self.default_mode = mode
         self.default_lam = lam
@@ -45,6 +46,7 @@ class DiscoRunner:
         self.default_weight_solver = weight_solver
         self.default_counterfactual_builder = counterfactual_builder
         self.default_explainer = explainer
+        self.default_anchor_space = anchor_space
 
     def run(
         self,
@@ -63,6 +65,7 @@ class DiscoRunner:
         weight_solver: Optional[WeightSolver] = None,
         counterfactual_builder: Optional[object] = None,
         explainer: Optional[Explainer] = None,
+        anchor_space: Optional[str] = None,
     ) -> DiscoOutput:
         """Run DISCO with explicit inputs."""
         if x_star.ndim == 1:
@@ -71,12 +74,20 @@ class DiscoRunner:
         runner_mode = mode or self.default_mode
         runner_lam = self.default_lam if lam is None else lam
         anchor = anchor_selector or self.default_anchor_selector or AnchorSelector()
-        solver = weight_solver or self.default_weight_solver or WeightSolver(method="projected_grad", max_iter=1000)
+        solver = (
+            weight_solver
+            or self.default_weight_solver
+            or WeightSolver(method="projected_grad", max_iter=1000)
+        )
         if counterfactual_builder is None:
             if self.default_counterfactual_builder is not None:
                 builder = self.default_counterfactual_builder
             else:
-                builder = PModeCounterfactual() if runner_mode == "p" else SModeCounterfactual()
+                builder = (
+                    PModeCounterfactual()
+                    if runner_mode == "p"
+                    else SModeCounterfactual()
+                )
         else:
             builder = counterfactual_builder
         expl = explainer or self.default_explainer or Explainer()
@@ -96,10 +107,17 @@ class DiscoRunner:
             target_class=target_class,
             mode=runner_mode,
             lam=runner_lam,
+            anchor_space=anchor_space or self.default_anchor_space,
         )
 
-        diagnostics = {k: v for k, v in result.items() if k not in ("te_output", "weights")}
-        return DiscoOutput(te_output=result["te_output"], weights=result["weights"], diagnostics=diagnostics)
+        diagnostics = {
+            k: v for k, v in result.items() if k not in ("te_output", "weights")
+        }
+        return DiscoOutput(
+            te_output=result["te_output"],
+            weights=result["weights"],
+            diagnostics=diagnostics,
+        )
 
 
 __all__ = ["DiscoRunner", "DiscoOutput"]
