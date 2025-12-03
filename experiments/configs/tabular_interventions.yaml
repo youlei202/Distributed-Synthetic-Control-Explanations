@@ -1,0 +1,19 @@
+interventions:
+  - type: FeatureAdd
+    feat_idx: 0
+    delta_max: 3.0
+    name: intensity_shift
+  - type: FeatureAdd
+    feat_idx: 1
+    delta_max: 2.5
+  - type: FeatureScale
+    feat_idx: 2
+    scale_max: 0.5
+  - type: FeatureScale
+    feat_idx: 3
+    scale_max: 0.8
+  - type: ClampedShift
+    feat_idx: 4
+    shift_max: 2.0
+    lower: -2.0
+    upper: 2.0
